@@ -80,7 +80,7 @@ def make_request(to_receive: str, headers: dict, params: dict = None, selected_w
     return request(method='GET', url=url, headers=headers, params=params)
 
 
-def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> dict:
+def get_api_tasks(api_key: str, headers: dict = None, params: dict = None) -> dict:
     """
     Gets tasks from Clockify API. Makes 3 request, each on different API levels, to receive all data required to
         extract tasks API. Work Flow:
