@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 
 from requests import request, exceptions, Response
 from os import environ
@@ -128,9 +128,21 @@ def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> di
     return tasks
 
 
-def extract_report(api_key: str, data: dict, date_start: datetime.datetime, date_end: datetime.datetime) -> str:
+def extract_report(api_key: str, data: dict, date_start: datetime, date_end: datetime) -> str:
+    """
+    Extracts Report on selected project from Reports Clockify API.
+    :param api_key: Clockify API key.
+    :param data: JSON from Clockify API. Should content workspaceId and projectId.
+    :param date_start: start of the period that we need report about
+    :param date_end: end of the period that we need report about
+    :return: str with Report
+    """
     print('Extracting Summary Report...')
+    # receiving data from passed argument that we need to pass to HTTP request
     workspace_id = data['workspaceId']
+    project_id = data['id']
+
+    # building HTTP request parts
     report_url = REPORTS_BASE_URL + f'workspaces/{workspace_id}/reports/summary'
     report_body = json.dumps({"dateRangeStart": date_start.isoformat('T'),
                               "dateRangeEnd": date_end.isoformat('T'),
@@ -140,38 +152,43 @@ def extract_report(api_key: str, data: dict, date_start: datetime.datetime, date
                                       "DATE",
                                       "TASK"
                                   ]
-                              }})
+                              },
+                              "projects": {
+                                  "ids": [str(project_id)]},
+                              })
     headers = {'x-api-key': api_key, 'Content-type': 'application/json'}
+
     req = request(method='POST', url=report_url, headers=headers, data=report_body)
     report_json = req.json()
     print('Extraction finished...')
+
     report = prettify_report(report_json)
     return report
 
 
 def prettify_report(data: dict) -> str:
+    """
+    Makes pretty txt Report from received data from Clockify API.
+    :param data: data that needs to be prettified. Must be JSON from reports.api.clockify.me
+    :return:str with prettified report
+    """
+    # Retrieving data that we need to operate with
     group_one = data.get('groupOne')[0]
     print('Prettifying Report...')
-    duration = datetime.timedelta(seconds=group_one['duration'])
+    duration = timedelta(seconds=group_one['duration'])
     grouped_dates = group_one['children']
-    s = ''
-    dates = []
-    tasks = []
-    for date in grouped_dates:
-        date_str = date['name'] + '\n'
-        dates.append(date['name'])
-        for task in date['children']:
-            print(json.dumps(task, ensure_ascii=False, indent=4))
-            unformated_time_spent = task['duration']
-            time_spent = str(datetime.timedelta(seconds=unformated_time_spent))
-            print(time_spent)
-            date_str += f'Task: {task["name"]}\nDuration: {time_spent}\n'
-            tasks.append({task['name']: time_spent})
-            date_str += '-----------------------------------\n'
-        s += date_str + '\n'
 
-        print('TASK: ', tasks[0])
-        print('GROUP ONE: ', group_one)
+    # retrieve dates and tasks with duration and parse it to string
+    time_periods = ''
+    for date in grouped_dates:
+        date_str = '--->' + date['name'] + '\n-----------------------------------\n'
+        for task in date['children']:
+            unformatted_time_spent = task['duration']
+            time_spent = str(timedelta(seconds=unformatted_time_spent))
+            date_str += f'Task: {task["name"]}\nDuration: {time_spent}\n' + '-----------------------------------\n'
+        time_periods += date_str + '\n'
+
+        # building report
     report = \
         f"""
 +++++++++   SUMMARY REPORT   +++++++++
@@ -179,5 +196,6 @@ Project name: {group_one['name']}
 Project Clockify Id: {group_one['_id']}
 Total Duration: {duration}
 Working Periods:
-{s}"""
+-----------------------------------
+{time_periods}"""
     return report
