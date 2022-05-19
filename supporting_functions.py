@@ -1,6 +1,8 @@
+import datetime
+
 from requests import request, exceptions, Response
 from os import environ
-from constants import BASE_URL, URLS_DICT, CHECK_ERROR_MESSAGE, CHECK_SUCCESS_MESSAGE
+from constants import BASE_URL, URLS_DICT, CHECK_ERROR_MESSAGE, CHECK_SUCCESS_MESSAGE, REPORTS_BASE_URL
 import json
 
 
@@ -72,13 +74,13 @@ def make_request(to_receive: str, headers: dict, params: dict = None, selected_w
         url = resp.url.split('?')[0] + resp.json()[selected_workspace]['id'] + '/projects/'
         print('Receiving projects...')
     else:
-        url = resp.url.split('?')[0] + resp.json()[selected_project]['id'] + '/tasks/'
+        url = resp.url.split('?')[0] + resp.json()[selected_project]['id']
         print('Receiving tasks...')
 
     return request(method='GET', url=url, headers=headers, params=params)
 
 
-def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> list:
+def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> dict:
     """
     Gets tasks from Clockify API. Makes 3 request, each on different API levels, to receive all data required to
         extract tasks API. Work Flow:
@@ -91,7 +93,7 @@ def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> li
     :param api_key: Clockify API KEY
     :param headers: optional. HTTP-request headers.
     :param params: optional. HTTP-request params.
-    :return: list (Tasks JSON)
+    :return: dict (Tasks JSON)
     """
     if headers is None:
         headers = {'x-api-key': api_key}
@@ -122,6 +124,60 @@ def get_tasks_api(api_key: str, headers: dict = None, params: dict = None) -> li
 
     # Making request to receive tasks
     tasks_resp = make_request('tasks', headers, params, resp=project_resp, selected_project=selected_project)
-    tasks_string = json.dumps(tasks_resp.json(), ensure_ascii=False, indent=4).encode('utf-8')
-    tasks = json.loads(tasks_string)
+    tasks = tasks_resp.json()
     return tasks
+
+
+def extract_report(api_key: str, data: dict, date_start: datetime.datetime, date_end: datetime.datetime) -> str:
+    print('Extracting Summary Report...')
+    workspace_id = data['workspaceId']
+    report_url = REPORTS_BASE_URL + f'workspaces/{workspace_id}/reports/summary'
+    report_body = json.dumps({"dateRangeStart": date_start.isoformat('T'),
+                              "dateRangeEnd": date_end.isoformat('T'),
+                              "summaryFilter": {
+                                  "groups": [
+                                      "PROJECT",
+                                      "DATE",
+                                      "TASK"
+                                  ]
+                              }})
+    headers = {'x-api-key': api_key, 'Content-type': 'application/json'}
+    req = request(method='POST', url=report_url, headers=headers, data=report_body)
+    report_json = req.json()
+    print('Extraction finished...')
+    report = prettify_report(report_json)
+    return report
+
+
+def prettify_report(data: dict) -> str:
+    group_one = data.get('groupOne')[0]
+    print('Prettifying Report...')
+    duration = datetime.timedelta(seconds=group_one['duration'])
+    grouped_dates = group_one['children']
+    s = ''
+    dates = []
+    tasks = []
+    for date in grouped_dates:
+        date_str = date['name'] + '\n'
+        dates.append(date['name'])
+        for task in date['children']:
+            print(json.dumps(task, ensure_ascii=False, indent=4))
+            unformated_time_spent = task['duration']
+            time_spent = str(datetime.timedelta(seconds=unformated_time_spent))
+            print(time_spent)
+            date_str += f'Task: {task["name"]}\nDuration: {time_spent}\n'
+            tasks.append({task['name']: time_spent})
+            date_str += '-----------------------------------\n'
+        s += date_str + '\n'
+
+        print('TASK: ', tasks[0])
+        print('GROUP ONE: ', group_one)
+    report = \
+        f"""
++++++++++   SUMMARY REPORT   +++++++++
+Project name: {group_one['name']}
+Project Clockify Id: {group_one['_id']}
+Total Duration: {duration}
+Working Periods:
+{s}"""
+    return report
